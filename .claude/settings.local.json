@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx prisma generate:*)",
+      "Bash(pnpm --filter api exec prisma:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm --filter shared build:*)",
+      "Bash(pnpm --filter api typecheck:*)",
+      "Bash(pnpm --filter web typecheck:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm --filter @addon-platform/builder typecheck:*)",
+      "Bash(pnpm --filter @addon-platform/api typecheck:*)",
+      "Bash(pnpm --filter @addon-platform/web typecheck:*)",
+      "Bash(npx --no prisma migrate dev:*)",
+      "Bash(npx --no prisma migrate resolve:*)",
+      "Bash(docker compose:*)"
+    ]
+  }
+}
