@@ -17,16 +17,14 @@ const { data, pending, error, refresh } = await useAsyncData(
   `version-${versionId.value}`,
   () => api.get<{
     version: AddonVersion & { addon: { id: string; name: string; slug: string; githubRepoFullName?: string } };
-  }>(`/api/organizations/${orgId.value}/addons/${route.query.addonId || ''}/versions/${versionId.value}`),
+  }>(`/api/organizations/${orgId.value}/addons/${addonSlug.value}/versions/${versionId.value}`),
   { watch: [versionId] }
 );
 
 const version = computed(() => data.value?.version);
-const addonId = computed(() => version.value?.addon?.id || (route.query.addonId as string) || '');
-
 const { connected, latestStatus } = useVersionEvents(
   orgId.value,
-  addonId.value,
+  addonSlug.value,
   versionId.value
 );
 
@@ -42,7 +40,7 @@ const buildReport = ref<BuildReport | null>(null);
 const buildReportLoading = ref(false);
 
 async function fetchBuildReport() {
-  if (!addonId.value) return;
+  if (!addonSlug.value) return;
   buildReportLoading.value = true;
   try {
     const result = await api.get<{
@@ -51,7 +49,7 @@ async function fetchBuildReport() {
       buildFinishedAt: string | null;
       downloadUrl: string | null;
       fileSize: number | null;
-    }>(`/api/organizations/${orgId.value}/addons/${addonId.value}/versions/${versionId.value}/build`);
+    }>(`/api/organizations/${orgId.value}/addons/${addonSlug.value}/versions/${versionId.value}/build`);
     buildReport.value = result.buildReport;
   } catch {
     // Silently fail
@@ -61,7 +59,7 @@ async function fetchBuildReport() {
 }
 
 watch(currentStatus, (status) => {
-  if (status === 'PUBLISHED' || status === 'FAILED') {
+  if (status === 'PUBLISHED' || status === 'FAILED' || status === 'CHANGES_REQUESTED') {
     fetchBuildReport();
   }
 });
@@ -70,11 +68,11 @@ const prStatus = ref<PrStatusResponse | null>(null);
 const prLoading = ref(false);
 
 async function fetchPrStatus() {
-  if (!version.value?.githubPrNumber || !addonId.value) return;
+  if (!version.value?.githubPrNumber || !addonSlug.value) return;
   prLoading.value = true;
   try {
     const result = await api.get<{ prStatus: PrStatusResponse | null }>(
-      `/api/organizations/${orgId.value}/addons/${addonId.value}/versions/${versionId.value}/pr-status`
+      `/api/organizations/${orgId.value}/addons/${addonSlug.value}/versions/${versionId.value}/pr-status`
     );
     prStatus.value = result.prStatus;
   } catch {
@@ -89,10 +87,22 @@ onMounted(() => {
     fetchPrStatus();
   }
   const status = currentStatus.value;
-  if (status === 'BUILDING' || status === 'PUBLISHED' || status === 'FAILED') {
+  if (status === 'BUILDING' || status === 'PUBLISHED' || status === 'FAILED' || status === 'CHANGES_REQUESTED') {
     fetchBuildReport();
   }
 });
+
+const submitting = ref(false);
+
+async function handleSubmit() {
+  submitting.value = true;
+  try {
+    await api.post(`/api/organizations/${orgId.value}/addons/${addonSlug.value}/versions/${versionId.value}/submit`);
+    await refresh();
+  } catch (err) {
+    alert(err instanceof Error ? err.message : 'Failed to submit version');
+  }
+}
 
 function formatDate(date: Date | string | undefined) {
   if (!date) return '-';
@@ -129,6 +139,21 @@ function formatDate(date: Date | string | undefined) {
             {{ connected ? 'Live' : 'Disconnected' }}
           </span>
         </div>
+      </div>
+
+      <div v-if="currentStatus === 'DRAFT'" class="card draft-card">
+        <h3 class="card-title">Ready to Submit?</h3>
+        <p class="draft-desc">
+          Push your code to the <code>submission/v{{ version.version }}</code> branch, then submit for review.
+          This will create a pull request for the review team.
+        </p>
+        <button
+          class="btn btn-primary"
+          :disabled="submitting"
+          @click="handleSubmit"
+        >
+          {{ submitting ? 'Submitting...' : 'Submit for Review' }}
+        </button>
       </div>
 
       <div class="card progress-card">
@@ -208,6 +233,19 @@ function formatDate(date: Date | string | undefined) {
           <span class="building-text">Building...</span>
         </div>
         <p class="building-desc">The addon is being built. This page will update automatically.</p>
+      </div>
+
+      <div v-if="currentStatus === 'CHANGES_REQUESTED'" class="card failed-card">
+        <h3 class="card-title">Changes Requested</h3>
+        <p class="failed-desc">
+          <template v-if="buildReport">
+            The CI build failed. Review the build report below, push fixes to the submission branch,
+            and the CI will re-run automatically. Once it passes and a reviewer approves, the PR will be auto-merged.
+          </template>
+          <template v-else>
+            A reviewer has requested changes. Push fixes to the submission branch and request a new review.
+          </template>
+        </p>
       </div>
 
       <div v-if="currentStatus === 'PUBLISHED' && version.downloadUrl" class="card download-card">
@@ -482,5 +520,39 @@ function formatDate(date: Date | string | undefined) {
   .details-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.draft-card {
+  border-left: 3px solid var(--color-primary, #3b82f6);
+}
+
+.draft-desc {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.draft-desc code {
+  background: var(--color-surface);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+}
+
+.failed-card {
+  border-left: 3px solid var(--color-error, #ef4444);
+}
+
+.failed-desc {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.failed-steps {
+  font-size: 0.875rem;
+  padding-left: 1.25rem;
+  margin-bottom: 1rem;
+  line-height: 1.75;
 }
 </style>

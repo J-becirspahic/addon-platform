@@ -4,6 +4,7 @@ import {
   listAddonsHandler,
   getAddonHandler,
   updateAddonHandler,
+  deleteAddonHandler,
 } from './addons.handlers.js';
 
 export default async function addonsRoutes(fastify: FastifyInstance) {
@@ -13,7 +14,9 @@ export default async function addonsRoutes(fastify: FastifyInstance) {
 
   fastify.get('/:orgId/addons', listAddonsHandler);
 
-  fastify.get('/:orgId/addons/:addonId', getAddonHandler);
+  fastify.get('/:orgId/addons/:addonSlug', getAddonHandler);
 
-  fastify.patch('/:orgId/addons/:addonId', updateAddonHandler);
+  fastify.patch('/:orgId/addons/:addonSlug', updateAddonHandler);
+
+  fastify.delete('/:orgId/addons/:addonSlug', deleteAddonHandler);
 }

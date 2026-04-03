@@ -1,5 +1,5 @@
 export type AddonStatus = 'DRAFT' | 'ACTIVE' | 'DEPRECATED' | 'ARCHIVED';
-export type VersionStatus = 'DRAFT' | 'SUBMITTED' | 'IN_REVIEW' | 'CHANGES_REQUESTED' | 'APPROVED' | 'BUILDING' | 'PUBLISHED' | 'FAILED';
+export type VersionStatus = 'DRAFT' | 'SUBMITTED' | 'CHANGES_REQUESTED' | 'APPROVED' | 'BUILDING' | 'PUBLISHED' | 'FAILED';
 export type AddonType = 'WIDGET' | 'CONNECTOR' | 'THEME';
 
 export interface BuildStep {

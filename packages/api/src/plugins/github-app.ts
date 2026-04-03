@@ -2,6 +2,9 @@ import fp from 'fastify-plugin';
 import { Octokit } from 'octokit';
 import { createAppAuth } from '@octokit/auth-app';
 import type { FastifyInstance } from 'fastify';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getConfig } from '../lib/config.js';
 
 export interface GitHubAppClient {
@@ -38,6 +41,8 @@ export interface GitHubAppClient {
     reviews: Array<{ user: string; state: string; submittedAt?: string }>;
     checks: Array<{ name: string; status: string; conclusion: string | null }>;
   } | null>;
+  createBranch(repoFullName: string, branchName: string): Promise<boolean>;
+  mergePullRequest(repoFullName: string, prNumber: number, commitTitle: string): Promise<boolean>;
   getOAuthUrl(state: string): string;
   exchangeCodeForToken(code: string): Promise<string>;
   getUserInfo(accessToken: string): Promise<{
@@ -200,6 +205,24 @@ async function githubAppPluginCallback(fastify: FastifyInstance) {
         });
       } catch (error) {
         fastify.log.warn({ error }, 'Failed to create manifest template');
+      }
+
+      // Commit GitHub Actions workflow for CI/CD build pipeline
+      try {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const workflowContent = readFileSync(
+          resolve(__dirname, '../templates/addon-build-workflow.yml'),
+          'utf-8'
+        );
+        await appOctokit.rest.repos.createOrUpdateFileContents({
+          owner: orgName,
+          repo: repoName,
+          path: '.github/workflows/addon-build.yml',
+          message: 'Add addon build workflow',
+          content: Buffer.from(workflowContent).toString('base64'),
+        });
+      } catch (error) {
+        fastify.log.warn({ error }, 'Failed to create workflow file');
       }
 
       // Cache the repo ID for future scoped-token lookups
@@ -460,6 +483,52 @@ async function githubAppPluginCallback(fastify: FastifyInstance) {
     }
   }
 
+  async function createBranch(repoFullName: string, branchName: string): Promise<boolean> {
+    if (!appOctokit) return false;
+
+    const [owner, repo] = repoFullName.split('/');
+
+    try {
+      const { data: ref } = await appOctokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: 'heads/main',
+      });
+
+      await appOctokit.rest.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${branchName}`,
+        sha: ref.object.sha,
+      });
+
+      return true;
+    } catch (error) {
+      fastify.log.warn({ error, repoFullName, branchName }, 'Failed to create branch');
+      return false;
+    }
+  }
+
+  async function mergePullRequest(repoFullName: string, prNumber: number, commitTitle: string): Promise<boolean> {
+    if (!appOctokit) return false;
+
+    const [owner, repo] = repoFullName.split('/');
+
+    try {
+      await appOctokit.rest.pulls.merge({
+        owner,
+        repo,
+        pull_number: prNumber,
+        commit_title: commitTitle,
+        merge_method: 'squash',
+      });
+      return true;
+    } catch (error) {
+      fastify.log.warn({ error, repoFullName, prNumber }, 'Failed to merge pull request');
+      return false;
+    }
+  }
+
   function getOAuthUrl(state: string): string {
     if (!isOAuthConfigured) {
       throw new Error('GitHub OAuth is not configured');
@@ -536,6 +605,8 @@ async function githubAppPluginCallback(fastify: FastifyInstance) {
     createPullRequest,
     setRepoPrivate,
     getPrStatus,
+    createBranch,
+    mergePullRequest,
     getOAuthUrl,
     exchangeCodeForToken,
     getUserInfo,

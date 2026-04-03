@@ -15,12 +15,12 @@ export const createVersionSchema = z.object({
 
 export const versionParamsSchema = z.object({
   orgId: z.string().min(1),
-  addonId: z.string().min(1),
+  addonSlug: z.string().min(1),
 });
 
 export const versionIdParamsSchema = z.object({
   orgId: z.string().min(1),
-  addonId: z.string().min(1),
+  addonSlug: z.string().min(1),
   versionId: z.string().min(1),
 });
 

@@ -101,7 +101,6 @@ model Addon {
 enum VersionStatus {
   DRAFT
   SUBMITTED
-  IN_REVIEW
   CHANGES_REQUESTED
   APPROVED
   BUILDING

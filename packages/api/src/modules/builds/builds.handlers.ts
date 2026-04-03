@@ -10,7 +10,7 @@ import { sseBroker } from '../../lib/sse.js';
 import { ForbiddenError } from '../../lib/errors.js';
 
 function getService(request: FastifyRequest): BuildsService {
-  return new BuildsService(request.server.prisma, sseBroker);
+  return new BuildsService(request.server.prisma, sseBroker, request.server.github);
 }
 
 export async function buildCallbackHandler(
@@ -58,7 +58,7 @@ export async function getBuildReportHandler(
   const service = getService(request);
   const result = await service.getBuildReport(
     parsed.data.orgId,
-    parsed.data.addonId,
+    parsed.data.addonSlug,
     parsed.data.versionId,
     userId
   );

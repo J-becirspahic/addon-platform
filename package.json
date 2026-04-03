@@ -15,6 +15,7 @@
     "db:generate": "pnpm --filter @addon-platform/api prisma generate",
     "db:migrate": "pnpm --filter @addon-platform/api prisma migrate dev",
     "db:push": "pnpm --filter @addon-platform/api prisma db push",
+    "db:seed": "pnpm --filter @addon-platform/api prisma db seed",
     "db:studio": "pnpm --filter @addon-platform/api prisma studio"
   },
   "devDependencies": {

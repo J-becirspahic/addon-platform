@@ -114,11 +114,11 @@ export class AddonsService {
     }));
   }
 
-  async getAddon(orgId: string, addonId: string, userId: string) {
+  async getAddon(orgId: string, addonSlug: string, userId: string) {
     await this.getMemberWithRole(orgId, userId);
 
     const addon = await this.prisma.addon.findFirst({
-      where: { id: addonId, organizationId: orgId },
+      where: { slug: addonSlug, organizationId: orgId },
       include: {
         versions: {
           orderBy: { createdAt: 'desc' },
@@ -127,7 +127,7 @@ export class AddonsService {
     });
 
     if (!addon) {
-      throw new NotFoundError('Addon', addonId);
+      throw new NotFoundError('Addon', addonSlug);
     }
 
     return {
@@ -138,22 +138,22 @@ export class AddonsService {
 
   async updateAddon(
     orgId: string,
-    addonId: string,
+    addonSlug: string,
     userId: string,
     input: UpdateAddonInput
   ): Promise<Addon> {
     const member = await this.getMemberWithRole(orgId, userId);
 
     const addon = await this.prisma.addon.findFirst({
-      where: { id: addonId, organizationId: orgId },
+      where: { slug: addonSlug, organizationId: orgId },
     });
 
     if (!addon) {
-      throw new NotFoundError('Addon', addonId);
+      throw new NotFoundError('Addon', addonSlug);
     }
 
     const updatedAddon = await this.prisma.addon.update({
-      where: { id: addonId },
+      where: { id: addon.id },
       data: {
         ...(input.name !== undefined && { name: input.name }),
         ...(input.description !== undefined && { description: input.description }),
@@ -161,9 +161,44 @@ export class AddonsService {
       },
     });
 
-    await this.createAuditLog(userId, AUDIT_ACTIONS.ADDON_UPDATED, 'addon', addonId, orgId, input);
+    await this.createAuditLog(userId, AUDIT_ACTIONS.ADDON_UPDATED, 'addon', addon.id, orgId, input);
 
     return updatedAddon;
+  }
+
+  async deleteAddon(orgId: string, addonSlug: string, userId: string): Promise<void> {
+    await this.getMemberWithRole(orgId, userId);
+
+    const addon = await this.prisma.addon.findFirst({
+      where: { slug: addonSlug, organizationId: orgId },
+      include: {
+        versions: {
+          where: { status: 'PUBLISHED' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!addon) {
+      throw new NotFoundError('Addon', addonSlug);
+    }
+
+    if (addon.githubRepoUrl) {
+      throw new ForbiddenError('Cannot delete an addon with a linked GitHub repository');
+    }
+
+    if (addon.versions.length > 0) {
+      throw new ForbiddenError('Cannot delete an addon with published versions');
+    }
+
+    await this.prisma.addon.delete({
+      where: { id: addon.id },
+    });
+
+    await this.createAuditLog(userId, AUDIT_ACTIONS.ADDON_DELETED, 'addon', addon.id, orgId, {
+      name: addon.name,
+      slug: addon.slug,
+    });
   }
 
   private async getMemberWithRole(orgId: string, userId: string) {

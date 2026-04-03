@@ -76,34 +76,48 @@ Verify all three services are running:
 | 5.1 | Go to My Test Org > Addons tab > New Addon | Create addon form shown |
 | 5.2 | Fill in name "Test Widget", check "Create GitHub repository" | Form accepts input |
 | 5.3 | Submit | Addon created, "View Repository" link appears |
-| 5.4 | Click the GitHub repo link | Opens GitHub. Repo is private, has CODEOWNERS file and addon.manifest.json template |
-| 5.5 | Check the repo's branch protection (Settings > Branches on GitHub) | Main branch requires PR with 1 approval |
+| 5.4 | Click the GitHub repo link | Opens GitHub. Repo is private, has addon.manifest.json template |
+| 5.5 | Check the repo's branch protection (Settings > Branches on GitHub) | Main branch requires PR with 1 approval (**paid GitHub org plan only** — free orgs do not support branch protection on private repos, skip this step) |
 | 5.6 | Check repo collaborators (Settings > Collaborators on GitHub) | Your GitHub account is listed as outside collaborator |
+
+> **Note (free GitHub orgs):** CODEOWNERS may not be created due to a race condition with repo initialization. Branch protection rules require a paid plan (Team/Enterprise) for private repos. These do not affect the core workflow — PRs can still be created, reviewed, and merged manually.
 
 ### Test 6 — Version Creation & Submission (Full Workflow)
 
 | # | Step | Expected Result |
 |---|------|-----------------|
 | 6.1 | On the addon page, click "New Version" | Version creation form |
-| 6.2 | Enter version 1.0.0, add a changelog, submit | Version created as DRAFT. Page shows git instructions |
-| 6.3 | Clone the GitHub repo locally | Repo cloned with README, CODEOWNERS, addon.manifest.json |
-| 6.4 | Create branch `submission/v1.0.0`, update addon.manifest.json with version 1.0.0, add an index.js file, push | Push succeeds |
-| 6.5 | Check the version detail page on the portal | Status changes to SUBMITTED, PR link appears |
-| 6.6 | Open the PR on GitHub | PR was auto-created with title "Addon submission: Test Widget v1.0.0" |
-| 6.7 | On GitHub, approve the PR as a reviewer | Portal version status changes to APPROVED |
-| 6.8 | Merge the PR on GitHub | Portal status changes to BUILDING |
-| 6.9 | Wait for the build to complete | Status changes to PUBLISHED or FAILED (depending on builder setup) |
-| 6.10 | Check the version detail page | Build report shown with step details |
+| 6.2 | Enter version 1.0.0, add a changelog, submit | Version created as DRAFT. Branch `submission/v1.0.0` is auto-created on GitHub. Page shows git instructions |
+| 6.3 | Clone the GitHub repo locally | Repo cloned with README and addon.manifest.json (CODEOWNERS may be absent on free plans) |
+| 6.4 | Fetch and checkout `submission/v1.0.0`, update addon.manifest.json with version 1.0.0, add an index.js file, push | Push succeeds |
+| 6.5 | On the version detail page, click "Submit for Review" | Status changes to SUBMITTED, PR link appears |
+| 6.6 | Open the PR on GitHub | PR was created with title "Addon submission: Test Widget v1.0.0". GitHub Actions CI starts automatically |
+| 6.7 | Wait for CI to complete on GitHub | Green checkmark appears on the PR (check the Actions tab) |
+| 6.8 | On GitHub, approve the PR as a reviewer | Portal status changes to APPROVED. If CI already passed, the PR is auto-merged and status changes to PUBLISHED |
+| 6.9 | Check the version detail page | Status is PUBLISHED, PR was auto-merged |
+
+> **Note:** The auto-merge happens when both conditions are met: CI passes AND the PR is approved. The order doesn't matter — if you approve before CI finishes, it will auto-merge once CI passes. If CI passes before approval, it will auto-merge once you approve.
 
 ### Test 7 — Changes Requested Flow
 
 | # | Step | Expected Result |
 |---|------|-----------------|
-| 7.1 | Create version 1.1.0 for the same addon | DRAFT version created |
-| 7.2 | Push to `submission/v1.1.0` | Status changes to SUBMITTED, PR created |
-| 7.3 | On GitHub, request changes on the PR | Portal status changes to CHANGES_REQUESTED |
-| 7.4 | Push additional commits to the same branch | PR updates on GitHub |
-| 7.5 | Approve the PR | Status changes to APPROVED |
+| 7.1 | Create version 1.1.0 for the same addon | DRAFT version created, branch `submission/v1.1.0` auto-created |
+| 7.2 | Fetch and checkout `submission/v1.1.0`, make changes, push | Version stays DRAFT (push does not auto-submit) |
+| 7.3 | On the version detail page, click "Submit for Review" | Status changes to SUBMITTED, PR created, CI starts |
+| 7.4 | On GitHub, request changes on the PR | Portal status changes to CHANGES_REQUESTED |
+| 7.5 | Push additional commits to the same branch | CI re-runs on the PR |
+| 7.6 | Approve the PR after fixes | Once CI passes + approval, PR is auto-merged and status changes to PUBLISHED |
+
+### Test 7b — CI Failure Flow
+
+| # | Step | Expected Result |
+|---|------|-----------------|
+| 7b.1 | Create a version with an invalid addon.manifest.json (e.g., missing entryPoint) | DRAFT version created |
+| 7b.2 | Submit for review | PR created, CI starts |
+| 7b.3 | Wait for CI to fail | Portal status changes to CHANGES_REQUESTED. CI failure details visible on the PR |
+| 7b.4 | Push a fix to the submission branch | CI re-runs automatically |
+| 7b.5 | Once CI passes, approve the PR | PR auto-merged, status changes to PUBLISHED |
 
 ### Test 8 — Notifications
 

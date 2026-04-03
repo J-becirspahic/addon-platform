@@ -6,6 +6,18 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding database...');
 
+  // Create system user for webhook-triggered audit logs
+  await prisma.user.upsert({
+    where: { id: 'system' },
+    update: {},
+    create: {
+      id: 'system',
+      email: 'system@addon-platform.internal',
+      name: 'System',
+    },
+  });
+  console.log('  System user: system (for webhook audit logs)');
+
   // Create admin user
   const adminPasswordHash = await bcrypt.hash('Admin123!', 10);
   const admin = await prisma.user.upsert({

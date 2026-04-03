@@ -16,7 +16,7 @@ export function useApi() {
     const fetchOptions: RequestInit = {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
         ...headers,
       },
       credentials: 'include',

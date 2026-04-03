@@ -38,19 +38,6 @@ export async function githubWebhookHandler(
     return reply.send({ received: true, duplicate: true });
   }
 
-  // Staleness check: reject events with parseable timestamp older than 5 minutes
-  const eventTimestamp =
-    (request.body as Record<string, unknown>).timestamp as string | undefined
-    || (request.body.pull_request as Record<string, unknown> | undefined)?.updated_at as string | undefined
-    || (request.body.repository as Record<string, unknown> | undefined)?.pushed_at as string | undefined;
-  if (webhookDedup.isStale(eventTimestamp)) {
-    request.log.warn({ deliveryId, event, eventTimestamp }, 'Stale webhook event, rejecting');
-    return reply.status(400).send({
-      error: 'BAD_REQUEST',
-      message: 'Webhook event is too old',
-    });
-  }
-
   const rawBody = JSON.stringify(request.body);
   const isValid = service.verifySignature(rawBody, signature);
 

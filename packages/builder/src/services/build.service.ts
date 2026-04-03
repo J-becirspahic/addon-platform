@@ -276,7 +276,9 @@ export class BuildService {
     const { promisify } = await import('util');
     const execAsync = promisify(exec);
 
-    await execAsync(`tar -xzf "${tarballPath}" -C "${destDir}" --strip-components=1`);
+    const tarballPosix = tarballPath.replace(/\\/g, '/');
+    const destDirPosix = destDir.replace(/\\/g, '/');
+    await execAsync(`tar -xzf "${tarballPosix}" -C "${destDirPosix}" --strip-components=1 --force-local`);
     await fs.unlink(tarballPath);
   }
 

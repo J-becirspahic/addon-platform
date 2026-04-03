@@ -17,7 +17,7 @@ export async function buildReportRoutes(fastify: FastifyInstance) {
   fastify.addHook('preHandler', fastify.authenticate);
 
   fastify.get(
-    '/:orgId/addons/:addonId/versions/:versionId/build',
+    '/:orgId/addons/:addonSlug/versions/:versionId/build',
     getBuildReportHandler
   );
 }

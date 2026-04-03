@@ -1,0 +1,189 @@
+name: Addon Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  statuses: write
+
+jobs:
+  build:
+    name: Build Addon
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate manifest
+        id: manifest
+        run: |
+          if [ ! -f "addon.manifest.json" ]; then
+            echo "::error::addon.manifest.json not found"
+            exit 1
+          fi
+
+          # Validate required fields
+          NAME=$(jq -r '.name // empty' addon.manifest.json)
+          VERSION=$(jq -r '.version // empty' addon.manifest.json)
+          TYPE=$(jq -r '.type // empty' addon.manifest.json)
+          ENTRY=$(jq -r '.entryPoint // empty' addon.manifest.json)
+
+          if [ -z "$NAME" ] || [ -z "$VERSION" ] || [ -z "$TYPE" ] || [ -z "$ENTRY" ]; then
+            echo "::error::addon.manifest.json missing required fields (name, version, type, entryPoint)"
+            exit 1
+          fi
+
+          # Validate version is semver
+          if ! echo "$VERSION" | grep -qE '^\d+\.\d+\.\d+(-[\w.]+)?$'; then
+            echo "::error::Version '$VERSION' is not valid semver"
+            exit 1
+          fi
+
+          # Validate type
+          if [ "$TYPE" != "widget" ] && [ "$TYPE" != "connector" ] && [ "$TYPE" != "theme" ]; then
+            echo "::error::Invalid addon type '$TYPE'. Must be widget, connector, or theme"
+            exit 1
+          fi
+
+          # Validate entryPoint file exists
+          if [ ! -f "$ENTRY" ]; then
+            echo "::error::Entry point '$ENTRY' does not exist"
+            exit 1
+          fi
+
+          # Extract version from branch name and verify match
+          BRANCH="${GITHUB_HEAD_REF}"
+          BRANCH_VERSION="${BRANCH#submission/v}"
+          if [ "$BRANCH_VERSION" != "$BRANCH" ] && [ "$BRANCH_VERSION" != "$VERSION" ]; then
+            echo "::error::Manifest version '$VERSION' does not match branch version '$BRANCH_VERSION'"
+            exit 1
+          fi
+
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+          echo "entry=$ENTRY" >> "$GITHUB_OUTPUT"
+          echo "Manifest valid: $NAME v$VERSION ($TYPE)"
+
+      - name: Check dependencies
+        run: |
+          ALLOWED='["lodash","dayjs","date-fns","uuid","zod","ajv","chalk","semver","mitt","eventemitter3","rxjs","immer","ramda","underscore","classnames","clsx","nanoid","ms","debug","pino","winston","cheerio","marked","dompurify","sanitize-html","he","escape-html","validator","yup","joi","qs","query-string","pluralize","slugify","change-case","camelcase","dotenv","cross-env","deepmerge","fast-deep-equal"]'
+
+          DEPS=$(jq -r '.dependencies // {} | keys[]' addon.manifest.json 2>/dev/null)
+
+          if [ -n "$DEPS" ]; then
+            DISALLOWED=""
+            while IFS= read -r dep; do
+              if ! echo "$ALLOWED" | jq -e "index(\"$dep\")" > /dev/null 2>&1; then
+                DISALLOWED="$DISALLOWED $dep"
+              fi
+            done <<< "$DEPS"
+
+            if [ -n "$DISALLOWED" ]; then
+              echo "::error::Disallowed dependencies found:$DISALLOWED"
+              exit 1
+            fi
+          fi
+
+          echo "Dependency check passed"
+
+      - name: Security scan
+        run: |
+          CRITICAL_FOUND=false
+
+          # Scan JS/TS files for dangerous patterns
+          FILES=$(find . -type f \( -name "*.js" -o -name "*.ts" -o -name "*.mjs" -o -name "*.cjs" -o -name "*.jsx" -o -name "*.tsx" \) \
+            -not -path "*/node_modules/*" -not -path "*/.git/*")
+
+          for file in $FILES; do
+            # eval() usage
+            if grep -nE '\beval\s*\(' "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::eval() usage detected — this is not allowed"
+              CRITICAL_FOUND=true
+            fi
+
+            # new Function()
+            if grep -nE '\bnew\s+Function\s*\(' "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::new Function() usage detected — this is not allowed"
+              CRITICAL_FOUND=true
+            fi
+
+            # child_process
+            if grep -nE "require\s*\(\s*['\"]child_process" "$file" > /dev/null 2>&1 || \
+               grep -nE "from\s+['\"]child_process" "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::child_process usage detected — this is not allowed"
+              CRITICAL_FOUND=true
+            fi
+
+            # Network modules
+            if grep -nE "require\s*\(\s*['\"](?:net|http|https)['\"]" "$file" > /dev/null 2>&1 || \
+               grep -nE "from\s+['\"](?:net|http|https)['\"]" "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::Network module usage detected — this is not allowed"
+              CRITICAL_FOUND=true
+            fi
+
+            # Dynamic URL imports
+            if grep -nE "import\s*\(\s*['\"]https?://" "$file" > /dev/null 2>&1; then
+              echo "::error file=$file::Dynamic URL import detected — this is not allowed"
+              CRITICAL_FOUND=true
+            fi
+
+            # Warnings (non-fatal)
+            if grep -nE "require\s*\(\s*['\"]fs['\"]" "$file" > /dev/null 2>&1 || \
+               grep -nE "from\s+['\"]fs['\"]" "$file" > /dev/null 2>&1; then
+              echo "::warning file=$file::fs module usage detected"
+            fi
+
+            if grep -nE "process\.env" "$file" > /dev/null 2>&1; then
+              echo "::warning file=$file::process.env access detected"
+            fi
+          done
+
+          if [ "$CRITICAL_FOUND" = true ]; then
+            echo "::error::Security scan failed — critical issues found"
+            exit 1
+          fi
+
+          echo "Security scan passed"
+
+      - name: Install dependencies
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci --production
+          elif [ -f "package.json" ]; then
+            npm install --production
+          fi
+
+      - name: Build addon
+        run: |
+          TYPE="${{ steps.manifest.outputs.type }}"
+
+          # Themes may have a build step
+          if [ "$TYPE" = "theme" ] && [ -f "package.json" ] && grep -q '"build"' package.json; then
+            npm run build || true
+          fi
+
+          # Package the addon
+          mkdir -p output
+          tar -czf output/addon.tar.gz --exclude=output --exclude=.git --exclude=node_modules .
+
+          echo "Addon packaged successfully"
+          ls -lh output/addon.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-bundle
+          path: output/addon.tar.gz
+          retention-days: 90

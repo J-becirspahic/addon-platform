@@ -18,9 +18,11 @@ export class WebhookDeduplicator {
     return false;
   }
 
-  isStale(timestamp: string | undefined): boolean {
+  isStale(timestamp: string | number | undefined): boolean {
     if (!timestamp) return false;
-    const eventTime = new Date(timestamp).getTime();
+    const num = Number(timestamp);
+    // Unix epoch in seconds (10 digits) → convert to milliseconds
+    const eventTime = !isNaN(num) && num < 1e12 ? num * 1000 : new Date(timestamp).getTime();
     if (isNaN(eventTime)) return false;
     return Date.now() - eventTime > STALE_THRESHOLD_MS;
   }

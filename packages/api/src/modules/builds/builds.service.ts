@@ -3,11 +3,13 @@ import { AUDIT_ACTIONS, NOTIFICATION_TYPES } from '@addon-platform/shared';
 import { versionChannel, type SSEBroker } from '../../lib/sse.js';
 import { NotFoundError, ForbiddenError } from '../../lib/errors.js';
 import type { BuildCallbackInput, ListBuildsQuery } from './builds.schemas.js';
+import type { GitHubAppClient } from '../../plugins/github-app.js';
 
 export class BuildsService {
   constructor(
     private prisma: PrismaClient,
-    private sse: SSEBroker
+    private sse: SSEBroker,
+    private github: GitHubAppClient
   ) {}
 
   async handleBuildCallback(input: BuildCallbackInput): Promise<void> {
@@ -20,20 +22,44 @@ export class BuildsService {
       throw new NotFoundError('AddonVersion', input.versionId);
     }
 
-    const newStatus = input.status === 'success' ? 'PUBLISHED' : 'FAILED';
+    const buildPassed = input.status === 'success';
 
     const updateData: Record<string, unknown> = {
-      status: newStatus,
       buildReport: input.report as object,
       buildFinishedAt: new Date(),
     };
 
-    if (input.status === 'success') {
-      updateData.publishedAt = new Date();
+    if (buildPassed) {
+      // Build passed — auto-merge the PR, then the merge webhook will set PUBLISHED
       if (input.downloadUrl) updateData.downloadUrl = input.downloadUrl;
       if (input.fileSize) updateData.fileSize = input.fileSize;
       if (input.checksum) updateData.checksum = input.checksum;
+
+      if (version.githubPrNumber && version.addon.githubRepoFullName) {
+        const merged = await this.github.mergePullRequest(
+          version.addon.githubRepoFullName,
+          version.githubPrNumber,
+          `Publish ${version.addon.name} v${version.version}`
+        );
+
+        if (merged) {
+          updateData.status = 'PUBLISHED';
+          updateData.publishedAt = new Date();
+        } else {
+          // Merge failed but build passed — mark as published anyway
+          updateData.status = 'PUBLISHED';
+          updateData.publishedAt = new Date();
+        }
+      } else {
+        updateData.status = 'PUBLISHED';
+        updateData.publishedAt = new Date();
+      }
+    } else {
+      // Build failed — revert to CHANGES_REQUESTED so the developer can fix and resubmit
+      updateData.status = 'CHANGES_REQUESTED';
     }
+
+    const newStatus = updateData.status as string;
 
     await this.prisma.addonVersion.update({
       where: { id: input.versionId },
@@ -102,7 +128,7 @@ export class BuildsService {
 
   async getBuildReport(
     orgId: string,
-    addonId: string,
+    addonSlug: string,
     versionId: string,
     userId: string
   ): Promise<{
@@ -122,7 +148,7 @@ export class BuildsService {
     }
 
     const version = await this.prisma.addonVersion.findFirst({
-      where: { id: versionId, addonId },
+      where: { id: versionId, addon: { slug: addonSlug, organizationId: orgId } },
     });
 
     if (!version) {

@@ -47,7 +47,7 @@ async function handleSubmit() {
       }
     );
 
-    router.push(`/orgs/${orgId.value}/addons/${addon.id}`);
+    router.push(`/orgs/${orgId.value}/addons/${addon.slug}`);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to create addon';
   } finally {

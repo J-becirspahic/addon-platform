@@ -4,7 +4,7 @@ import {
   createAddonSchema,
   updateAddonSchema,
   orgIdParamSchema,
-  addonIdParamSchema,
+  addonSlugParamSchema,
 } from './addons.schemas.js';
 import { UnauthorizedError } from '../../lib/errors.js';
 
@@ -51,10 +51,10 @@ export async function getAddonHandler(
   reply: FastifyReply
 ) {
   const userId = requireUser(request);
-  const { orgId, addonId } = addonIdParamSchema.parse(request.params);
+  const { orgId, addonSlug } = addonSlugParamSchema.parse(request.params);
   const service = getService(request);
 
-  const addon = await service.getAddon(orgId, addonId, userId);
+  const addon = await service.getAddon(orgId, addonSlug, userId);
 
   return reply.send({ addon });
 }
@@ -64,11 +64,24 @@ export async function updateAddonHandler(
   reply: FastifyReply
 ) {
   const userId = requireUser(request);
-  const { orgId, addonId } = addonIdParamSchema.parse(request.params);
+  const { orgId, addonSlug } = addonSlugParamSchema.parse(request.params);
   const input = updateAddonSchema.parse(request.body);
   const service = getService(request);
 
-  const addon = await service.updateAddon(orgId, addonId, userId, input);
+  const addon = await service.updateAddon(orgId, addonSlug, userId, input);
 
   return reply.send({ addon });
+}
+
+export async function deleteAddonHandler(
+  request: FastifyRequest<{ Params: unknown }>,
+  reply: FastifyReply
+) {
+  const userId = requireUser(request);
+  const { orgId, addonSlug } = addonSlugParamSchema.parse(request.params);
+  const service = getService(request);
+
+  await service.deleteAddon(orgId, addonSlug, userId);
+
+  return reply.status(204).send();
 }

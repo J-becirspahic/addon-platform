@@ -45,7 +45,7 @@ async function handleSubmit() {
   try {
     const result = await api.post<{
       version: { id: string; version: string; branchName: string };
-    }>(`/api/organizations/${orgId.value}/addons/${addon.value!.id}/versions`, {
+    }>(`/api/organizations/${orgId.value}/addons/${addonSlug.value}/versions`, {
       version: form.version,
       changelog: form.changelog || undefined,
     });
@@ -129,8 +129,8 @@ async function handleSubmit() {
           <code class="command">git clone {{ cloneUrl }}</code>
         </div>
         <div class="command-block">
-          <p class="command-label">2. Create and checkout the submission branch:</p>
-          <code class="command">git checkout -b {{ createdVersion.branchName }}</code>
+          <p class="command-label">2. Fetch and checkout the submission branch:</p>
+          <code class="command">git fetch origin<br/>git checkout {{ createdVersion.branchName }}</code>
         </div>
         <div class="command-block">
           <p class="command-label">3. Make your changes, commit, and push:</p>

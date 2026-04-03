@@ -31,6 +31,10 @@ export interface WebhookPayload {
     };
   };
   ref?: string;
+  check_suite?: {
+    conclusion: string;
+    pull_requests: Array<{ number: number }>;
+  };
   [key: string]: unknown;
 }
 
@@ -77,6 +81,8 @@ export class WebhooksService {
         return this.handlePullRequestReview(payload);
       case 'repository':
         return this.handleRepository(payload);
+      case 'check_suite':
+        return this.handleCheckSuite(payload);
       case 'member':
         return this.handleMember(payload);
       case 'ping':
@@ -99,80 +105,9 @@ export class WebhooksService {
       return { processed: true, message: 'Push to non-submission branch, ignoring' };
     }
 
-    const versionString = branchMatch[1];
-
-    const addon = await this.prisma.addon.findFirst({
-      where: { githubRepoFullName: repoFullName },
-    });
-
-    if (!addon) {
-      return { processed: false, message: 'Repository not associated with any addon' };
-    }
-
-    const version = await this.prisma.addonVersion.findFirst({
-      where: {
-        addon: { githubRepoFullName: repoFullName },
-        version: versionString,
-        status: { in: ['DRAFT', 'CHANGES_REQUESTED'] },
-      },
-    });
-
-    if (!version) {
-      return { processed: false, message: `No matching DRAFT/CHANGES_REQUESTED version ${versionString}` };
-    }
-
-    if (version.githubPrNumber) {
-      return { processed: true, message: 'PR already created for this version, skipping' };
-    }
-
-    const branchName = `submission/v${versionString}`;
-    const pr = await this.github.createPullRequest(
-      repoFullName,
-      branchName,
-      'main',
-      `Addon submission: ${addon.name} v${versionString}`,
-      `Submission for addon **${addon.name}** version **${versionString}**.\n\n${version.changelog || ''}`
-    );
-
-    if (!pr) {
-      return { processed: false, message: 'Failed to create pull request' };
-    }
-
-    await this.updateVersionStatus(version.id, 'SUBMITTED', {
-      githubPrNumber: pr.number,
-      githubPrUrl: pr.url,
-      submittedAt: new Date(),
-    });
-
-    this.emitVersionUpdate(version.id, 'SUBMITTED');
-
-    await this.createNotificationsForOrg(
-      addon,
-      version.id,
-      NOTIFICATION_TYPES.VERSION_SUBMITTED,
-      'Version Submitted',
-      `${addon.name} v${versionString} has been submitted for review`
-    );
-
-    await this.createAuditLog(
-      'system',
-      AUDIT_ACTIONS.VERSION_SUBMITTED,
-      'version',
-      version.id,
-      addon.organizationId,
-      { prNumber: pr.number, prUrl: pr.url }
-    );
-
-    await this.createAuditLog(
-      'system',
-      AUDIT_ACTIONS.PR_CREATED,
-      'version',
-      version.id,
-      addon.organizationId,
-      { prNumber: pr.number, repoFullName }
-    );
-
-    return { processed: true, message: `PR #${pr.number} created, version set to SUBMITTED` };
+    // Pushes to submission branches are acknowledged but don't auto-submit.
+    // Developers must manually submit via the portal to create a PR.
+    return { processed: true, message: `Push to submission branch v${branchMatch[1]} received` };
   }
 
   private async handlePullRequest(payload: WebhookPayload): Promise<{ processed: boolean; message: string }> {
@@ -226,31 +161,23 @@ export class WebhooksService {
 
     if (action === 'closed') {
       if (pull_request.merged) {
-        if (version.status !== 'BUILDING') {
-          await this.updateVersionStatus(version.id, 'BUILDING');
-          this.emitVersionUpdate(version.id, 'BUILDING');
-
-          await this.createNotificationsForOrg(
-            addon,
-            version.id,
-            NOTIFICATION_TYPES.VERSION_BUILDING,
-            'Version Building',
-            `${addon.name} v${version.version} PR merged, build started`
-          );
-
-          await this.createAuditLog(
-            'system',
-            AUDIT_ACTIONS.PR_MERGED,
-            'version',
-            version.id,
-            addon.organizationId,
-            { prNumber }
-          );
-
-          // Trigger build pipeline
-          await this.triggerBuild(version.id, addon);
+        // PR was auto-merged after a successful build — already PUBLISHED
+        // Or manually merged — treat as published
+        if (version.status !== 'PUBLISHED') {
+          await this.updateVersionStatus(version.id, 'PUBLISHED', { publishedAt: new Date() });
+          this.emitVersionUpdate(version.id, 'PUBLISHED');
         }
-        return { processed: true, message: 'PR merged, version set to BUILDING' };
+
+        await this.createAuditLog(
+          'system',
+          AUDIT_ACTIONS.PR_MERGED,
+          'version',
+          version.id,
+          addon.organizationId,
+          { prNumber }
+        );
+
+        return { processed: true, message: 'PR merged, version set to PUBLISHED' };
       } else {
         if (version.status !== 'CHANGES_REQUESTED') {
           await this.updateVersionStatus(version.id, 'CHANGES_REQUESTED');
@@ -305,28 +232,30 @@ export class WebhooksService {
     const addon = version.addon;
 
     if (review.state === 'approved') {
-      if (version.status !== 'APPROVED') {
-        await this.updateVersionStatus(version.id, 'APPROVED');
-        this.emitVersionUpdate(version.id, 'APPROVED');
+      await this.updateVersionStatus(version.id, 'APPROVED');
+      this.emitVersionUpdate(version.id, 'APPROVED');
 
-        await this.createNotificationsForOrg(
-          addon,
-          version.id,
-          NOTIFICATION_TYPES.VERSION_APPROVED,
-          'Version Approved',
-          `${addon.name} v${version.version} has been approved by ${review.user.login}`
-        );
+      await this.createNotificationsForOrg(
+        addon,
+        version.id,
+        NOTIFICATION_TYPES.VERSION_APPROVED,
+        'Version Approved',
+        `${addon.name} v${version.version} has been approved by ${review.user.login}`
+      );
 
-        await this.createAuditLog(
-          'system',
-          AUDIT_ACTIONS.VERSION_APPROVED,
-          'version',
-          version.id,
-          addon.organizationId,
-          { reviewer: review.user.login, prNumber }
-        );
-      }
-      return { processed: true, message: 'Review approved, version set to APPROVED' };
+      await this.createAuditLog(
+        'system',
+        AUDIT_ACTIONS.VERSION_APPROVED,
+        'version',
+        version.id,
+        addon.organizationId,
+        { reviewer: review.user.login, prNumber }
+      );
+
+      // Build runs via GitHub Actions CI — if checks already passed, auto-merge
+      await this.tryAutoMerge(version, addon, prNumber);
+
+      return { processed: true, message: 'Review approved' };
     }
 
     if (review.state === 'changes_requested') {
@@ -415,57 +344,139 @@ export class WebhooksService {
     return { processed: true, message: `Repository event: ${action}` };
   }
 
-  private async handleMember(_payload: WebhookPayload): Promise<{ processed: boolean; message: string }> {
-    return { processed: true, message: 'Member event received' };
-  }
+  private async handleCheckSuite(payload: WebhookPayload): Promise<{ processed: boolean; message: string }> {
+    const { action, check_suite, repository } = payload;
 
-  private async triggerBuild(versionId: string, addon: Addon): Promise<void> {
-    const config = getConfig();
-
-    if (!config.BUILDER_URL || !config.BUILD_CALLBACK_SECRET) {
-      return;
+    if (action !== 'completed' || !check_suite || !repository) {
+      return { processed: false, message: 'Not a completed check suite' };
     }
 
-    try {
-      // Set buildStartedAt on the version
-      await this.prisma.addonVersion.update({
-        where: { id: versionId },
-        data: { buildStartedAt: new Date() },
-      });
+    const repoFullName = repository.full_name;
+    const conclusion = check_suite.conclusion; // success, failure, etc.
+    const prNumbers: number[] = (check_suite.pull_requests || []).map((pr: { number: number }) => pr.number);
 
-      const version = await this.prisma.addonVersion.findUnique({
-        where: { id: versionId },
-      });
+    if (prNumbers.length === 0) {
+      return { processed: true, message: 'Check suite completed but no PRs associated' };
+    }
 
-      if (!version) return;
-
-      await fetch(`${config.BUILDER_URL}/api/builds`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Build-Secret': config.BUILD_CALLBACK_SECRET,
+    for (const prNumber of prNumbers) {
+      const version = await this.prisma.addonVersion.findFirst({
+        where: {
+          githubPrNumber: prNumber,
+          addon: { githubRepoFullName: repoFullName },
         },
-        body: JSON.stringify({
-          versionId,
-          addonId: addon.id,
-          addonType: (addon as Addon & { type?: string }).type || 'WIDGET',
-          repoFullName: addon.githubRepoFullName,
-          version: version.version,
-        }),
+        include: { addon: true },
       });
+
+      if (!version) continue;
+
+      const addon = version.addon;
+
+      if (conclusion === 'success') {
+        // CI passed — update build status and try auto-merge if approved
+        if (version.status !== 'PUBLISHED') {
+          await this.prisma.addonVersion.update({
+            where: { id: version.id },
+            data: {
+              buildFinishedAt: new Date(),
+              ...(!version.buildStartedAt ? { buildStartedAt: new Date() } : {}),
+            },
+          });
+
+          await this.tryAutoMerge(version, addon, prNumber);
+        }
+
+        return { processed: true, message: `CI passed for PR #${prNumber}` };
+      }
+
+      if (conclusion === 'failure') {
+        // CI failed — set to CHANGES_REQUESTED
+        if (version.status !== 'CHANGES_REQUESTED') {
+          await this.updateVersionStatus(version.id, 'CHANGES_REQUESTED');
+          this.emitVersionUpdate(version.id, 'CHANGES_REQUESTED');
+
+          await this.prisma.addonVersion.update({
+            where: { id: version.id },
+            data: {
+              buildFinishedAt: new Date(),
+              ...(!version.buildStartedAt ? { buildStartedAt: new Date() } : {}),
+            },
+          });
+
+          await this.createNotificationsForOrg(
+            addon,
+            version.id,
+            NOTIFICATION_TYPES.VERSION_CHANGES_REQUESTED,
+            'Build Failed',
+            `${addon.name} v${version.version} CI checks failed`
+          );
+
+          await this.createAuditLog(
+            'system',
+            AUDIT_ACTIONS.BUILD_FAILED,
+            'version',
+            version.id,
+            addon.organizationId,
+            { prNumber, conclusion }
+          );
+        }
+
+        return { processed: true, message: `CI failed for PR #${prNumber}` };
+      }
+    }
+
+    return { processed: true, message: 'Check suite processed' };
+  }
+
+  private async tryAutoMerge(
+    version: { id: string; status: string; version: string; githubPrNumber: number | null },
+    addon: { id: string; name: string; organizationId: string; githubRepoFullName: string | null; [key: string]: unknown },
+    prNumber: number
+  ): Promise<void> {
+    // Auto-merge only if version is approved AND CI has passed
+    if (version.status !== 'APPROVED' || !addon.githubRepoFullName) return;
+
+    // Check if CI checks have passed
+    const prStatus = await this.github.getPrStatus(addon.githubRepoFullName, prNumber);
+    if (!prStatus) return;
+
+    const allChecksPassed = prStatus.checks.length > 0 &&
+      prStatus.checks.every(c => c.conclusion === 'success');
+
+    if (!allChecksPassed) return;
+
+    // All conditions met — merge the PR
+    const merged = await this.github.mergePullRequest(
+      addon.githubRepoFullName,
+      prNumber,
+      `Publish ${addon.name} v${version.version}`
+    );
+
+    if (merged) {
+      await this.updateVersionStatus(version.id, 'PUBLISHED', { publishedAt: new Date() });
+      this.emitVersionUpdate(version.id, 'PUBLISHED');
+
+      await this.createNotificationsForOrg(
+        addon,
+        version.id,
+        NOTIFICATION_TYPES.VERSION_PUBLISHED,
+        'Version Published',
+        `${addon.name} v${version.version} has been published`
+      );
 
       await this.createAuditLog(
         'system',
-        AUDIT_ACTIONS.BUILD_STARTED,
+        AUDIT_ACTIONS.BUILD_COMPLETED,
         'version',
-        versionId,
+        version.id,
         addon.organizationId,
-        { addonName: addon.name }
+        { prNumber }
       );
-    } catch (error) {
-      // Log but don't throw — builder may be unavailable
-      this.logger?.error({ error }, 'Failed to trigger build');
     }
+  }
+
+  private async handleMember(_payload: WebhookPayload): Promise<{ processed: boolean; message: string }> {
+    return { processed: true, message: 'Member event received' };
   }
 
   private async updateVersionStatus(
@@ -493,7 +504,7 @@ export class WebhooksService {
   }
 
   private async createNotificationsForOrg(
-    addon: Addon,
+    addon: Pick<Addon, 'id' | 'organizationId' | 'name'>,
     versionId: string | undefined,
     type: string,
     title: string,

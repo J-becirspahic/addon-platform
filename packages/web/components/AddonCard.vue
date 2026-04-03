@@ -24,7 +24,7 @@ const statusColor = computed(() => {
 </script>
 
 <template>
-  <NuxtLink :to="`/orgs/${orgId}/addons/${addon.id}`" class="addon-card card">
+  <NuxtLink :to="`/orgs/${orgId}/addons/${addon.slug}`" class="addon-card card">
     <div class="addon-header">
       <h3 class="addon-name">{{ addon.name }}</h3>
       <StatusBadge :status="addon.status" :variant="statusColor" />

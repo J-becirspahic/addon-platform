@@ -30,8 +30,38 @@ const { data, pending, error } = await useAsyncData(
   { watch: [orgId, addonSlug] }
 );
 
+const router = useRouter();
+const { confirm } = useConfirm();
+
 const addon = computed(() => data.value?.addon);
 const versions = computed(() => addon.value?.versions || []);
+
+const canDelete = computed(() => {
+  if (!addon.value) return false;
+  if (addon.value.githubRepoUrl) return false;
+  const hasPublished = addon.value.versions.some((v) => v.status === 'PUBLISHED');
+  return !hasPublished;
+});
+
+async function handleDelete() {
+  if (!addon.value) return;
+
+  const confirmed = await confirm({
+    title: 'Delete Addon',
+    message: `Are you sure you want to delete "${addon.value.name}"? This action cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  });
+
+  if (!confirmed) return;
+
+  try {
+    await api.delete(`/api/organizations/${orgId.value}/addons/${addonSlug.value}`);
+    router.push(`/orgs/${orgId.value}/addons`);
+  } catch (err) {
+    alert(err instanceof Error ? err.message : 'Failed to delete addon');
+  }
+}
 
 function formatDate(date: Date | string | undefined) {
   if (!date) return '-';
@@ -71,6 +101,13 @@ function formatDate(date: Date | string | undefined) {
           >
             View Repository
           </a>
+          <button
+            v-if="canDelete"
+            class="btn btn-danger"
+            @click="handleDelete"
+          >
+            Delete Addon
+          </button>
         </div>
       </div>
 

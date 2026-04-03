@@ -38,7 +38,7 @@ export const buildCallbackSchema = z.object({
 
 export const buildReportParamsSchema = z.object({
   orgId: z.string().min(1),
-  addonId: z.string().min(1),
+  addonSlug: z.string().min(1),
   versionId: z.string().min(1),
 });
 

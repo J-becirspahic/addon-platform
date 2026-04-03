@@ -7,13 +7,12 @@ export type AddonStatusType = (typeof ADDON_STATUSES)[number];
 export const ADDON_TYPES = ['WIDGET', 'CONNECTOR', 'THEME'] as const;
 export type AddonTypeType = (typeof ADDON_TYPES)[number];
 
-export const VERSION_STATUSES = ['DRAFT', 'SUBMITTED', 'IN_REVIEW', 'CHANGES_REQUESTED', 'APPROVED', 'BUILDING', 'PUBLISHED', 'FAILED'] as const;
+export const VERSION_STATUSES = ['DRAFT', 'SUBMITTED', 'CHANGES_REQUESTED', 'APPROVED', 'BUILDING', 'PUBLISHED', 'FAILED'] as const;
 export type VersionStatusType = (typeof VERSION_STATUSES)[number];
 
 export const VERSION_STATUS_COLORS: Record<VersionStatusType, string> = {
   DRAFT: 'gray',
   SUBMITTED: 'blue',
-  IN_REVIEW: 'yellow',
   CHANGES_REQUESTED: 'orange',
   APPROVED: 'green',
   BUILDING: 'purple',

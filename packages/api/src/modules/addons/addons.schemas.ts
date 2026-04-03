@@ -42,9 +42,9 @@ export const orgIdParamSchema = z.object({
   orgId: z.string().min(1),
 });
 
-export const addonIdParamSchema = z.object({
+export const addonSlugParamSchema = z.object({
   orgId: z.string().min(1),
-  addonId: z.string().min(1),
+  addonSlug: z.string().min(1),
 });
 
 export type CreateAddonInput = z.infer<typeof createAddonSchema>;
